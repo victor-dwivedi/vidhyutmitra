@@ -8,13 +8,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from keras.models import load_model
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
-from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import MinMaxScaler
 
 # Embed your Weather API key here
-API_KEY = "d224a9f66ffa425eab3180904242310" 
+API_KEY = "d224a9f66ffa425eab3180904242310"  # Replace with your actual Weather API key
 
 # Apply custom CSS
 st.markdown("""
@@ -65,6 +62,37 @@ def create_solar_energy_production(df):
     ).clip(lower=10)
     return df
 
+# Function to plot data
+def plot_data(df):
+    fig, axes = plt.subplots(3, 1, figsize=(10, 15))
+
+    # Sunlight hours plot
+    axes[0].plot(df['date'], df['sunlight_hours'], marker='o', color='gold', label='Sunlight Hours')
+    axes[0].set_title('Sunlight Hours Over Time')
+    axes[0].set_xlabel('Date')
+    axes[0].set_ylabel('Sunlight Hours')
+    axes[0].legend()
+    axes[0].tick_params(axis='x', rotation=45)
+
+    # Cloud cover plot
+    axes[1].plot(df['date'], df['cloud_cover'], marker='o', color='skyblue', label='Cloud Cover')
+    axes[1].set_title('Cloud Cover Over Time')
+    axes[1].set_xlabel('Date')
+    axes[1].set_ylabel('Cloud Cover (%)')
+    axes[1].legend()
+    axes[1].tick_params(axis='x', rotation=45)
+
+    # Temperature plot
+    axes[2].plot(df['date'], df['temperature'], marker='o', color='orange', label='Temperature')
+    axes[2].set_title('Average Temperature Over Time')
+    axes[2].set_xlabel('Date')
+    axes[2].set_ylabel('Temperature (°C)')
+    axes[2].legend()
+    axes[2].tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
 # Appliance Scheduling based on predictions
 def suggest_appliance_schedule(predicted_solar_production):
     peak_hours = predicted_solar_production.idxmax()
@@ -73,107 +101,137 @@ def suggest_appliance_schedule(predicted_solar_production):
         "afternoon": ["Air Conditioning", "Oven"],
         "evening": ["Dishwasher", "Television", "Lighting"]
     }
-    
+
     recommendations = {}
     for time, appliances in schedule.items():
-        if time == "morning":
-            recommendations[time] = (appliances, "8 AM - 11 AM")
-        elif time == "afternoon":
-            recommendations[time] = (appliances, "12 PM - 3 PM")
-        else:
-            recommendations[time] = (appliances, "6 PM - 9 PM")
-
+        recommendations[time] = (appliances, f"Use between {peak_hours - 1} PM and {peak_hours} PM")
+    
     return recommendations
 
-# Plot weather data
-def plot_weather_data(df):
-    fig, axes = plt.subplots(3, 1, figsize=(10, 15))
-    axes[0].plot(df['date'], df['sunlight_hours'], marker='o', color='gold')
-    axes[0].set_title('Sunlight Hours Over Time')
-    axes[1].plot(df['date'], df['cloud_cover'], marker='o', color='skyblue')
-    axes[1].set_title('Cloud Cover Over Time')
-    axes[2].plot(df['date'], df['temperature'], marker='o', color='orange')
-    axes[2].set_title('Temperature Over Time')
-    plt.tight_layout()
-    st.pyplot(fig)
+# Streamlit app
+def main():
+    st.markdown('<h1 class="main-title">Solar Energy Prediction and Tariff Forecasting</h1>', unsafe_allow_html=True)
 
-# Tariff Prediction using LSTM
-def predict_tariffs():
-    data = np.sin(0.1 * np.arange(1000)) + 0.1 * np.random.randn(1000)
+    LOCATION = st.text_input("Enter Location:", value="Nagpur")
+    
+    if st.button("Fetch Weather Data"):
+        weather_df = fetch_weather_data(LOCATION)
+        if not weather_df.empty:
+            # Create synthetic solar energy production data
+            weather_df = create_solar_energy_production(weather_df)
+            weather_df.ffill(inplace=True)  # Forward fill missing values
+            
+            # Display the weather data
+            st.write(weather_df)
+
+            # Plot the data
+            plot_data(weather_df)
+
+            # Prepare data for training
+            X = weather_df[['sunlight_hours', 'cloud_cover', 'temperature']]
+            y = weather_df['solar_energy_production']
+
+            # Split the data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+            # Train a Random Forest Regressor
+            model = RandomForestRegressor(n_estimators=100, random_state=42)
+            model.fit(X_train, y_train)
+
+            # Make predictions
+            y_pred = model.predict(X_test)
+
+            # Evaluate the model
+            mse = mean_squared_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+
+            st.write(f"Mean Squared Error: {mse:.2f}")
+            st.write(f"R^2 Score: {r2:.2f}")
+
+            # Appliance scheduling suggestion
+            appliance_schedule = suggest_appliance_schedule(y_pred)
+            st.write("Suggested Appliance Schedule:")
+            for time, (appliances, timing) in appliance_schedule.items():
+                st.write(f"{time.capitalize()}: {', '.join(appliances)} ({timing})")
+
+    # Tariff prediction section
+    st.markdown("## Tariff Prediction")
+    st.subheader("Load your trained LSTM model for tariff prediction")
+    
+    # Generate synthetic data for tariff prediction
+    def create_synthetic_data(num_samples=1000):
+        time = np.arange(num_samples)
+        data = np.sin(0.1 * time) + 0.1 * np.random.randn(num_samples)  # Example sine wave data with noise
+        return data
+
+    # Create sequences for LSTM
+    def create_sequences(data, seq_length):
+        X, y = [], []
+        for i in range(len(data) - seq_length):
+            X.append(data[i:(i + seq_length), 0])
+            y.append(data[i + seq_length, 0])
+        return np.array(X), np.array(y)
+
+    # Generate and prepare the data for tariff prediction
+    data = create_synthetic_data()
     data = data.reshape(-1, 1)
 
+    # Normalize the data
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_scaled = scaler.fit_transform(data)
 
+    # Create sequences
     SEQ_LENGTH = 10
-    X = np.array([data_scaled[i:i + SEQ_LENGTH] for i in range(len(data_scaled) - SEQ_LENGTH)])
-    y = np.array([data_scaled[i + SEQ_LENGTH] for i in range(len(data_scaled) - SEQ_LENGTH)])
+    X, y = create_sequences(data_scaled, SEQ_LENGTH)
+    X = X.reshape(X.shape[0], X.shape[1], 1)  # (samples, time steps, features)
 
+    # Load the pre-trained LSTM model
     try:
-        model = load_model('best_model.keras')
-        predictions = model.predict(X)
-        predicted_tariffs = scaler.inverse_transform(predictions)
-        actual_tariffs = scaler.inverse_transform(y.reshape(-1, 1))
-        fig, ax = plt.subplots(figsize=(14, 7))
-        ax.plot(actual_tariffs, label='Actual Tariffs', color='blue')
-        ax.plot(predicted_tariffs, label='Predicted Tariffs', color='red')
-        st.pyplot(fig)
+        model = load_model('best_model.keras')  # Load your model here
+        st.success("Model loaded successfully!")
     except Exception as e:
         st.error(f"Error loading model: {e}")
 
-# Main function
-def main():
-    st.markdown('<h1 class="main-title">Energy Management App</h1>', unsafe_allow_html=True)
-    st.sidebar.title("Choose an Analysis Section")
+    # If model loading was successful, proceed with predictions
+    if 'model' in locals():
+        # Make predictions
+        predictions = model.predict(X)
 
-    section = st.sidebar.selectbox("Select Section", 
-                                   ["Weather Forecast & Solar Energy Prediction",
-                                    "Tariff Prediction with LSTM",
-                                    "Appliance Scheduling"])
+        # Inverse transform and ensure non-negative values
+        predicted_tariffs = scaler.inverse_transform(predictions)
+        predicted_tariffs = np.abs(predicted_tariffs)  # Ensure predicted tariffs are non-negative
 
-    # Weather Forecast & Solar Energy Prediction
-    if section == "Weather Forecast & Solar Energy Prediction":
-        LOCATION = st.text_input("Enter Location:", value="Nagpur")
-        if st.button("Fetch Weather Data"):
-            weather_df = fetch_weather_data(LOCATION)
-            if not weather_df.empty:
-                weather_df = create_solar_energy_production(weather_df)
-                st.write(weather_df)
-                plot_weather_data(weather_df)
-                
-                X = weather_df[['sunlight_hours', 'cloud_cover', 'temperature']]
-                y = weather_df['solar_energy_production']
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                
-                model = RandomForestRegressor(n_estimators=100, random_state=42)
-                model.fit(X_train, y_train)
-                
-                y_pred = model.predict(X_test)
-                st.write(f'Mean Squared Error: {mean_squared_error(y_test, y_pred):.2f}')
-                st.write(f'R^2 Score: {r2_score(y_test, y_pred):.2f}')
+        # Inverse transform actual tariffs and ensure non-negative values
+        actual_tariffs = scaler.inverse_transform(y.reshape(-1, 1))
+        actual_tariffs = np.abs(actual_tariffs)  # Ensure actual tariffs are non-negative
 
-    # Tariff Prediction with LSTM
-    elif section == "Tariff Prediction with LSTM":
-        predict_tariffs()
+        # Plotting results
+        fig, ax = plt.subplots(figsize=(14, 7))
+        ax.plot(actual_tariffs, label='Actual Tariffs', color='blue')
+        ax.plot(predicted_tariffs, label='Predicted Tariffs', color='red')
+        ax.set_title('Comparison of Actual and Predicted Tariffs')
+        ax.set_xlabel('Time Steps')
+        ax.set_ylabel('Tariff Values')
+        ax.legend()
 
-    # Appliance Scheduling
-    elif section == "Appliance Scheduling":
-        LOCATION = "Nagpur" # Replace this with a location as needed
-        days = 30  # Use last 30 days for prediction data
-        weather_df = fetch_weather_data(LOCATION, days)
-        weather_df = create_solar_energy_production(weather_df)
-        
-        st.write("Predicted Solar Energy Production for the next day")
-        st.write(weather_df[['date', 'solar_energy_production']])
-        
-        predicted_production = weather_df['solar_energy_production'].rolling(window=7, min_periods=1).mean().iloc[-1]
-        st.write(f"Predicted Solar Energy for Next Day: {predicted_production:.2f} kWh")
-        
-        schedule = suggest_appliance_schedule(weather_df['solar_energy_production'])
-        st.subheader("Recommended Appliance Usage Schedule")
-        
-        for time, (appliances, hours) in schedule.items():
-            st.write(f"**{time.capitalize()} ({hours}):** {', '.join(appliances)}")
+        # Show the plot in Streamlit
+        st.pyplot(fig)
 
+        # Additional Plot: Highlight Low and High Tariff Regions
+        threshold = np.mean(actual_tariffs)  # Set a threshold as the mean of actual tariffs
+        low_tariff_indices = np.where(actual_tariffs.flatten() < threshold)[0]
+        high_tariff_indices = np.where(actual_tariffs.flatten() >= threshold)[0]
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+        ax.plot(actual_tariffs, label='Actual Tariffs', color='blue')
+        ax.scatter(low_tariff_indices, actual_tariffs[low_tariff_indices], color='green', label='Low Tariff Regions', marker='o')
+        ax.scatter(high_tariff_indices, actual_tariffs[high_tariff_indices], color='orange', label='High Tariff Regions', marker='o')
+        ax.set_title('Low and High Tariff Regions')
+        ax.set_xlabel('Time Steps')
+        ax.set_ylabel('Tariff Values')
+        ax.legend()
+        st.pyplot(fig)
+
+# Run the main function
 if __name__ == "__main__":
     main()
